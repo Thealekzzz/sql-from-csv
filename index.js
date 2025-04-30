@@ -1,7 +1,6 @@
 import { readFileSync, writeFileSync } from 'fs';
 
 function createTableAndFillFromCSV(filename, tableName, columns, sep = ';', dumpSize = 65) {
-
   // Read CSV data
   const text = readFileSync(filename).toString();
 
@@ -36,6 +35,8 @@ SET time_zone = "+00:00";
 CREATE TABLE \`${tableName}\` (
 ${colNamesStringExtended}
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
+
+CREATE UNIQUE INDEX idx_bulls_unique ON ${tableName}(name, naab_code, inter_reg_number, inventory_number);
 
 ${dumps}
 `;
