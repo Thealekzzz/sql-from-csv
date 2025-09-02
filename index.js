@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'fs';
 import { columns } from './consts.js';
 import { extname, join } from 'path';
+import XLSX from 'xlsx';
 
 String.prototype.replaceAll = function (from, to) {
     return this.split(from).join(to);
@@ -42,9 +43,9 @@ function createTableAndFillFromCSV(tableName, columns, sep = ';', dumpSize = 65)
 
     // Получаем список всех xlsx файлов в папке input
     const files = readdirSync(inputDir);
-    const csvFiles = files.filter((file) => extname(file).toLowerCase() === '.csv');
+    const xslxFiles = files.filter((file) => extname(file).toLowerCase() === '.xlsx');
 
-    if (csvFiles.length === 0) {
+    if (xslxFiles.length === 0) {
         console.log('В папке input не найдено xlsx файлов');
         return;
     }
@@ -52,12 +53,19 @@ function createTableAndFillFromCSV(tableName, columns, sep = ';', dumpSize = 65)
     let isCreatingTableCodeAdded = false;
     const duplicatesStorage = {};
 
-    for (const file of csvFiles) {
+    for (const file of xslxFiles) {
         const filePath = join(inputDir, file);
-        const fileName = file.replace('.csv', '');
+        const fileName = file.replace('.xlsx', '');
 
-        // Read CSV data
-        const text = readFileSync(filePath).toString();
+        // Читаем xlsx файл
+        const workbook = XLSX.readFile(filePath);
+
+        // Получаем первый лист
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+
+        // Конвертируем лист в csv
+        const text = XLSX.utils.sheet_to_csv(worksheet, { FS: ';' }).replace(/'/g, `"`);
 
         const data = text.split('\n');
         const head = data[0].replace('\r', '').split(sep);
@@ -175,48 +183,17 @@ CREATE UNIQUE INDEX idx_bulls_unique ON ${tableName}(name, naab_code, inter_reg_
         }
     }
 
-    console.log(Object.entries(duplicatesStorage).filter(([_, count]) => count > 1));
-}
+    const outputPath = join(outputDir, 'duplicates.txt');
+    const duplicatesText = Object.entries(duplicatesStorage)
+        .filter(([_, count]) => count > 1)
+        .map(([key, count]) => `${key} - ${count}`)
+        .join('\n');
 
-function checkDuplicats(filename, sep = ';') {
-    const columnsToCheck = ['NAAB Код', 'InterRegNumber'];
-    const counter = {};
-
-    // Read CSV data
-    const text = readFileSync('./input/' + filename).toString();
-
-    const data = text.split('\n');
-    const head = data[0].split(sep);
-
-    const rows = data.slice(1);
-
-    const columnNumbersToCheck = columnsToCheck.map((columnName) =>
-        head.findIndex((headName) => headName === columnName),
-    );
-
-    rows.forEach((row) => {
-        const values = row.split(sep);
-
-        const key = columnNumbersToCheck.map((number) => values[number]).join('-');
-
-        counter[key] = (counter[key] || 0) + 1;
-    });
-
-    console.log(
-        Object.entries(counter)
-            .filter(([key, value]) => value > 1)
-            .sort((a, b) => b[1] - a[1]),
-    );
-
-    return counter;
+    writeFileSync(outputPath, duplicatesText);
 }
 
 const tableName = 'AltaGenAugust2025';
-const breed = 'HO';
 const shouldCreateTable = true;
-
-// const countDuplicates = checkDuplicats(filename);
-// console.log(countDuplicates);
 
 createTableAndFillFromCSV(tableName, columns);
 
