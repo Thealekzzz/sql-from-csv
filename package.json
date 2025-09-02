@@ -8,5 +8,8 @@
     "start": "node index.js"
   },
   "author": "Alex Kuznetsov",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
 }
