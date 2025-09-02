@@ -190,14 +190,16 @@ function createTableAndFillFromCSV(
 
             if (shouldCreateTable && !isCreatingTableCodeAdded) {
                 result += `SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
-  START TRANSACTION;
-  SET time_zone = "+00:00";
+START TRANSACTION;
+SET time_zone = "+00:00";
+
+CREATE TABLE \`${tableName}\` (
+${colNamesStringExtended}
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
+
+CREATE UNIQUE INDEX idx_bulls_unique ON ${tableName}(name, naab_code, inter_reg_number, inventory_number);
   
-  CREATE TABLE \`${tableName}\` (
-  ${colNamesStringExtended}
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
-  
-  `;
+`;
                 isCreatingTableCodeAdded = true;
             }
 
