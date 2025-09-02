@@ -6,12 +6,31 @@ String.prototype.replaceAll = function (from, to) {
     return this.split(from).join(to);
 };
 
-function createTableAndFillFromCSV(
-    tableName,
-    columns,
-    sep = ';',
-    dumpSize = 65,
-) {
+function getRowsWithoutDuplicates(rows, head, duplicatesCounter, sep) {
+    const columnsToCheck = ['NAAB Код', 'InterRegNumber'];
+    const rowIndexesToExclude = {};
+
+    const columnNumbersToCheck = columnsToCheck.map((columnName) =>
+        head.findIndex((headName) => headName === columnName),
+    );
+
+    rows.forEach((row, index) => {
+        const values = row.split(sep);
+
+        const key = columnNumbersToCheck.map((number) => values[number]).join('-');
+
+        if (duplicatesCounter[key]) {
+            rowIndexesToExclude[index] = true;
+            duplicatesCounter[key] += 1;
+        } else {
+            duplicatesCounter[key] = 1;
+        }
+    });
+
+    return rows.filter((_, index) => !rowIndexesToExclude[index]);
+}
+
+function createTableAndFillFromCSV(tableName, columns, sep = ';', dumpSize = 65) {
     const chunkSize = 50000;
 
     // Папки ввода и вывода
@@ -23,9 +42,7 @@ function createTableAndFillFromCSV(
 
     // Получаем список всех xlsx файлов в папке input
     const files = readdirSync(inputDir);
-    const csvFiles = files.filter(
-        (file) => extname(file).toLowerCase() === '.csv',
-    );
+    const csvFiles = files.filter((file) => extname(file).toLowerCase() === '.csv');
 
     if (csvFiles.length === 0) {
         console.log('В папке input не найдено xlsx файлов');
@@ -33,6 +50,7 @@ function createTableAndFillFromCSV(
     }
 
     let isCreatingTableCodeAdded = false;
+    const duplicatesStorage = {};
 
     for (const file of csvFiles) {
         const filePath = join(inputDir, file);
@@ -44,69 +62,38 @@ function createTableAndFillFromCSV(
         const data = text.split('\n');
         const head = data[0].replace('\r', '').split(sep);
 
-        const rows = data.slice(1);
+        const rows = getRowsWithoutDuplicates(data.slice(1), head, duplicatesStorage, sep);
 
         const duplicatesCounter = {};
-        const columnsToCheckDuplicates = [
-            'NAAB Code',
-            'InterRegNumber',
-            'Name',
-        ];
-        const columnNumbersToCheck = columnsToCheckDuplicates.map(
-            (columnName) =>
-                head.findIndex((headName) => headName === columnName),
+        const columnsToCheckDuplicates = ['NAAB Code', 'InterRegNumber', 'Name'];
+        const columnNumbersToCheck = columnsToCheckDuplicates.map((columnName) =>
+            head.findIndex((headName) => headName === columnName),
         );
 
         const columnIndexesByDBColumnName = Object.fromEntries(
-            columns.map(
-                ({
-                    name: BDColumnName,
-                    columnNameInTable,
-                    ruColumnNameInTable,
-                }) => {
-                    let columnIndex = head.findIndex(
-                        (headName) => headName === columnNameInTable,
-                    );
+            columns.map(({ name: BDColumnName, columnNameInTable, ruColumnNameInTable }) => {
+                let columnIndex = head.findIndex((headName) => headName === columnNameInTable);
 
-                    if (columnIndex === -1) {
-                        columnIndex = head.findIndex(
-                            (headName) => headName === ruColumnNameInTable,
-                        );
-                    }
+                if (columnIndex === -1) {
+                    columnIndex = head.findIndex((headName) => headName === ruColumnNameInTable);
+                }
 
-                    return [
-                        BDColumnName,
-                        columnIndex !== -1 ? columnIndex : undefined,
-                    ];
-                },
-            ),
+                return [BDColumnName, columnIndex !== -1 ? columnIndex : undefined];
+            }),
         );
 
         // Make columns description
-        const colNamesStringExtended = columns
-            .map((column) => `\`${column.name}\` ${column.type}`)
-            .join(',\n');
+        const colNamesStringExtended = columns.map((column) => `\`${column.name}\` ${column.type}`).join(',\n');
 
-        const columnsToInsertData = columns.filter(
-            ({ name: BDColumnName }) => BDColumnName !== 'id',
-        );
-        const colNamesString = columnsToInsertData
-            .map((column) => `\`${column.name}\``)
-            .join(',');
+        const columnsToInsertData = columns.filter(({ name: BDColumnName }) => BDColumnName !== 'id');
+        const colNamesString = columnsToInsertData.map((column) => `\`${column.name}\``).join(',');
 
         // Make rows data
         const lines = rows
             .map((line) => {
-                const chars = line
-                    .split(sep)
-                    .map(
-                        (char) =>
-                            `'${char.replace('\r', '').replaceAll('\r', '')}'`,
-                    );
+                const chars = line.split(sep).map((char) => `'${char.replace('\r', '').replaceAll('\r', '')}'`);
 
-                const key = columnNumbersToCheck
-                    .map((number) => chars[number])
-                    .join('-');
+                const key = columnNumbersToCheck.map((number) => chars[number]).join('-');
                 if (duplicatesCounter[key]) {
                     return null;
                 }
@@ -115,33 +102,13 @@ function createTableAndFillFromCSV(
 
                 return columnsToInsertData
                     .map(({ name: BDColumnName }) => {
-                        if (
-                            columnIndexesByDBColumnName[BDColumnName] !==
-                            undefined
-                        ) {
-                            const value =
-                                chars[
-                                    columnIndexesByDBColumnName[BDColumnName]
-                                ];
+                        if (columnIndexesByDBColumnName[BDColumnName] !== undefined) {
+                            const value = chars[columnIndexesByDBColumnName[BDColumnName]];
 
-                            if (
-                                BDColumnName === 'birth_date' &&
-                                value &&
-                                value !== `''`
-                            ) {
+                            if (BDColumnName === 'birth_date' && value && value !== `''`) {
                                 try {
-                                    const [m, d, y] = value
-                                        .replace(/'/g, '')
-                                        .split('/');
-                                    return (
-                                        "'" +
-                                        [
-                                            y,
-                                            m.padStart(2, '0'),
-                                            d.padStart(2, '0'),
-                                        ].join('-') +
-                                        "'"
-                                    );
+                                    const [m, d, y] = value.replace(/'/g, '').split('/');
+                                    return `'${[y, m.padStart(2, '0'), d.padStart(2, '0')].join('-')}'`;
                                 } catch (err) {
                                     console.log(value);
                                     console.log(err);
@@ -166,9 +133,7 @@ function createTableAndFillFromCSV(
         const numberOfLines = lines.length;
         const chunks = Array(Math.ceil(numberOfLines / chunkSize))
             .fill()
-            .map((_, index) =>
-                lines.slice(index * chunkSize, (index + 1) * chunkSize),
-            );
+            .map((_, index) => lines.slice(index * chunkSize, (index + 1) * chunkSize));
 
         // console.log(lines);
 
@@ -179,9 +144,7 @@ function createTableAndFillFromCSV(
 
             // Make separated blocks of inserting data
             for (let i = 0; i < numberOfLines; i += dumpSize) {
-                const dataBlock = chunk
-                    .slice(i, Math.min(i + dumpSize, numberOfLines))
-                    .join(',\n');
+                const dataBlock = chunk.slice(i, Math.min(i + dumpSize, numberOfLines)).join(',\n');
                 const insertQuery = `INSERT INTO \`${tableName}\` (${colNamesString}) VALUES \n${dataBlock}`;
                 dumps += insertQuery + ';\n';
             }
@@ -208,11 +171,11 @@ CREATE UNIQUE INDEX idx_bulls_unique ON ${tableName}(name, naab_code, inter_reg_
             const outputFilename = `${fileName}_${chunkIndex + 1}.sql`;
             const outputPath = join(outputDir, outputFilename);
             writeFileSync(outputPath, result);
-            console.log(
-                `Записан файл ${outputFilename} (source ${outputFilename})`,
-            );
+            console.log(`Записан файл ${outputFilename} (source ${outputFilename})`);
         }
     }
+
+    console.log(Object.entries(duplicatesStorage).filter(([_, count]) => count > 1));
 }
 
 function checkDuplicats(filename, sep = ';') {
@@ -234,9 +197,7 @@ function checkDuplicats(filename, sep = ';') {
     rows.forEach((row) => {
         const values = row.split(sep);
 
-        const key = columnNumbersToCheck
-            .map((number) => values[number])
-            .join('-');
+        const key = columnNumbersToCheck.map((number) => values[number]).join('-');
 
         counter[key] = (counter[key] || 0) + 1;
     });
