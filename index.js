@@ -1,241 +1,173 @@
-import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'fs';
-import { columns } from './consts.js';
-import { extname, join } from 'path';
+import { writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { extname, join } from 'node:path';
 import XLSX from 'xlsx';
+import { columns } from './consts.js';
 
-String.prototype.replaceAll = function (from, to) {
-    return this.split(from).join(to);
+const CONFIG = {
+    inputDir: './input',
+    outputDir: './result',
+    chunkSize: 50000,
+    dumpSize: 65,
+    separator: ';',
+    columnsToCheckDuplicates: ['NAAB Code', 'InterRegNumber', 'Name'],
+    uniqueIndexColumns: ['name', 'naab_code', 'inter_reg_number', 'inventory_number'],
 };
 
-function getRowsWithoutDuplicates(rows, head, duplicatesCounter, sep) {
-    const columnsToCheck = ['NAAB Код', 'InterRegNumber'];
-    const rowIndexesToExclude = {};
-
-    const columnNumbersToCheck = columnsToCheck.map((columnName) =>
-        head.findIndex((headName) => headName === columnName),
-    );
-
-    rows.forEach((row, index) => {
-        const values = row.split(sep);
-
-        const key = columnNumbersToCheck.map((number) => values[number]).join('-');
-
-        if (duplicatesCounter[key]) {
-            rowIndexesToExclude[index] = true;
-            duplicatesCounter[key] += 1;
-        } else {
-            duplicatesCounter[key] = 1;
+class DataProcessor {
+    static formatDate(value) {
+        try {
+            const [month, day, year] = value.replace(/'/g, '').split('/');
+            return `'${[year, month.padStart(2, '0'), day.padStart(2, '0')].join('-')}'`;
+        } catch (error) {
+            console.error(`Error formatting date: ${value}`, error);
+            return 'NULL';
         }
-    });
-
-    return rows.filter((_, index) => !rowIndexesToExclude[index]);
-}
-
-function createTableAndFillFromCSV(tableName, columns, sep = ';', dumpSize = 65) {
-    const chunkSize = 50000;
-
-    // Папки ввода и вывода
-    const inputDir = './input';
-    const outputDir = './result';
-
-    // Создаем папку result, если она не существует
-    mkdirSync(outputDir, { recursive: true });
-
-    // Получаем список всех xlsx файлов в папке input
-    const files = readdirSync(inputDir);
-    const xslxFiles = files.filter((file) => extname(file).toLowerCase() === '.xlsx');
-
-    if (xslxFiles.length === 0) {
-        console.log('В папке input не найдено xlsx файлов');
-        return;
     }
 
-    let isCreatingTableCodeAdded = false;
-    const duplicatesStorage = {};
-
-    for (const file of xslxFiles) {
-        const filePath = join(inputDir, file);
-        const fileName = file.replace('.xlsx', '');
-
-        // Читаем xlsx файл
-        const workbook = XLSX.readFile(filePath);
-
-        // Получаем первый лист
-        const sheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[sheetName];
-
-        // Конвертируем лист в csv
-        const text = XLSX.utils.sheet_to_csv(worksheet, { FS: ';' }).replace(/'/g, `"`);
-
-        const data = text.split('\n');
-        const head = data[0].replace('\r', '').split(sep);
-
-        const rows = getRowsWithoutDuplicates(data.slice(1), head, duplicatesStorage, sep);
-
-        const duplicatesCounter = {};
-        const columnsToCheckDuplicates = ['NAAB Code', 'InterRegNumber', 'Name'];
-        const columnNumbersToCheck = columnsToCheckDuplicates.map((columnName) =>
-            head.findIndex((headName) => headName === columnName),
-        );
-
-        const columnIndexesByDBColumnName = Object.fromEntries(
-            columns.map(({ name: BDColumnName, columnNameInTable, ruColumnNameInTable }) => {
-                let columnIndex = head.findIndex((headName) => headName === columnNameInTable);
-
-                if (columnIndex === -1) {
-                    columnIndex = head.findIndex((headName) => headName === ruColumnNameInTable);
-                }
-
-                return [BDColumnName, columnIndex !== -1 ? columnIndex : undefined];
+    static getColumnIndexes(head, columns) {
+        return Object.fromEntries(
+            columns.map(({ name, columnNameInTable, ruColumnNameInTable }) => {
+                const index = head.findIndex((h) => h === columnNameInTable || h === ruColumnNameInTable);
+                return [name, index !== -1 ? index : undefined];
             }),
         );
+    }
 
-        // Make columns description
-        const colNamesStringExtended = columns.map((column) => `\`${column.name}\` ${column.type}`).join(',\n');
+    static removeDuplicates(rows, head, duplicatesCounter, columnsToCheck, separator) {
+        const columnIndexes = columnsToCheck.map((col) => head.findIndex((h) => h === col));
+        const rowIndexesToExclude = new Set();
 
-        const columnsToInsertData = columns.filter(({ name: BDColumnName }) => BDColumnName !== 'id');
-        const colNamesString = columnsToInsertData.map((column) => `\`${column.name}\``).join(',');
+        rows.forEach((row, index) => {
+            const values = row.split(separator);
+            const key = columnIndexes.map((i) => values[i]).join('-');
 
-        // Make rows data
-        const lines = rows
-            .map((line) => {
-                const chars = line.split(sep).map((char) => `'${char.replace('\r', '').replaceAll('\r', '')}'`);
-
-                const key = columnNumbersToCheck.map((number) => chars[number]).join('-');
-                if (duplicatesCounter[key]) {
-                    return null;
-                }
-
+            if (duplicatesCounter[key]) {
+                rowIndexesToExclude.add(index);
+                duplicatesCounter[key]++;
+            } else {
                 duplicatesCounter[key] = 1;
-
-                return columnsToInsertData
-                    .map(({ name: BDColumnName }) => {
-                        if (columnIndexesByDBColumnName[BDColumnName] !== undefined) {
-                            const value = chars[columnIndexesByDBColumnName[BDColumnName]];
-
-                            if (BDColumnName === 'birth_date' && value && value !== `''`) {
-                                try {
-                                    const [m, d, y] = value.replace(/'/g, '').split('/');
-                                    return `'${[y, m.padStart(2, '0'), d.padStart(2, '0')].join('-')}'`;
-                                } catch (err) {
-                                    console.log(value);
-                                    console.log(err);
-                                }
-                            }
-
-                            if (value === "''") {
-                                return 'NULL';
-                            }
-
-                            return value;
-                        }
-
-                        return 'NULL';
-                    })
-                    .join(',');
-            })
-            .filter((line) => line !== null)
-            .map((line) => `(${line})`);
-
-        // Separate lines on chunks to create low-sized files
-        const numberOfLines = lines.length;
-        const chunks = Array(Math.ceil(numberOfLines / chunkSize))
-            .fill()
-            .map((_, index) => lines.slice(index * chunkSize, (index + 1) * chunkSize));
-
-        // console.log(lines);
-
-        for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex++) {
-            const chunk = chunks[chunkIndex];
-            const numberOfLines = chunk.length;
-            let dumps = '';
-
-            // Make separated blocks of inserting data
-            for (let i = 0; i < numberOfLines; i += dumpSize) {
-                const dataBlock = chunk.slice(i, Math.min(i + dumpSize, numberOfLines)).join(',\n');
-                const insertQuery = `INSERT INTO \`${tableName}\` (${colNamesString}) VALUES \n${dataBlock}`;
-                dumps += insertQuery + ';\n';
             }
+        });
 
-            let result = '';
+        return rows.filter((_, index) => !rowIndexesToExclude.has(index));
+    }
 
-            if (shouldCreateTable && !isCreatingTableCodeAdded) {
-                result += `SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
+    static generateSQL(tableName, columns, rows, head, separator) {
+        const columnsToInsert = columns.filter((col) => col.name !== 'id');
+        const colNamesString = columnsToInsert.map((col) => `\`${col.name}\``).join(',');
+        const columnIndexes = this.getColumnIndexes(head, columns);
+        const duplicatesCounter = new Set();
+        const checkIndexes = CONFIG.columnsToCheckDuplicates.map((col) => head.findIndex((h) => h === col));
+
+        const sqlRows = rows
+            .map((row) => {
+                const values = row.split(separator).map((val) => `'${val.replace('\r', '')}'`);
+                const key = checkIndexes.map((i) => values[i]).join('-');
+
+                if (duplicatesCounter.has(key)) return null;
+                duplicatesCounter.add(key);
+
+                return `(${columnsToInsert
+                    .map(({ name }) => {
+                        if (columnIndexes[name] === undefined) return 'NULL';
+                        const value = values[columnIndexes[name]];
+                        return name === 'birth_date' && value !== "''"
+                            ? this.formatDate(value)
+                            : value === "''"
+                            ? 'NULL'
+                            : value;
+                    })
+                    .join(',')})`;
+            })
+            .filter((row) => row !== null);
+
+        return { sqlRows, colNamesString };
+    }
+
+    static createTableSQL(tableName, columns) {
+        const colDefs = columns.map((col) => `\`${col.name}\` ${col.type}`).join(',\n');
+        const uniqueIndex = `CREATE UNIQUE INDEX idx_bulls_unique ON \`${tableName}\`(${CONFIG.uniqueIndexColumns.join(
+            ', ',
+        )});`;
+
+        return `SET SQL_MODE = "NO_AUTO_VALUE_ON_ZERO";
 START TRANSACTION;
 SET time_zone = "+00:00";
 
 CREATE TABLE \`${tableName}\` (
-${colNamesStringExtended}
+${colDefs}
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
 
-CREATE UNIQUE INDEX idx_bulls_unique ON ${tableName}(name, naab_code, inter_reg_number, inventory_number);
-  
+${uniqueIndex}
 `;
-                isCreatingTableCodeAdded = true;
-            }
-
-            result += dumps;
-
-            const outputFilename = `${fileName}_${chunkIndex + 1}.sql`;
-            const outputPath = join(outputDir, outputFilename);
-            writeFileSync(outputPath, result);
-            console.log(`Записан файл ${outputFilename} (source ${outputFilename})`);
-        }
     }
 
-    const outputPath = join(outputDir, 'duplicates.txt');
-    const duplicatesText = Object.entries(duplicatesStorage)
-        .filter(([_, count]) => count > 1)
-        .map(([key, count]) => `${key} - ${count}`)
-        .join('\n');
+    static async processFiles(tableName, columns, shouldCreateTable) {
+        mkdirSync(CONFIG.outputDir, { recursive: true });
+        const files = readdirSync(CONFIG.inputDir).filter((file) => extname(file).toLowerCase() === '.xlsx');
 
-    writeFileSync(outputPath, duplicatesText);
+        if (!files.length) {
+            console.log('No XLSX files found in input directory');
+            return;
+        }
+
+        const duplicatesStorage = {};
+        let isTableCreated = !shouldCreateTable;
+
+        for (const file of files) {
+            const filePath = join(CONFIG.inputDir, file);
+            const fileName = file.replace('.xlsx', '');
+            const workbook = XLSX.readFile(filePath);
+            const sheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[sheetName];
+            const csvData = XLSX.utils.sheet_to_csv(worksheet, { FS: CONFIG.separator }).replace(/'/g, '"');
+
+            const [head, ...rows] = csvData.split('\n').map((row) => row.replace('\r', ''));
+            const uniqueRows = this.removeDuplicates(
+                rows,
+                head.split(CONFIG.separator),
+                duplicatesStorage,
+                ['NAAB Код', 'InterRegNumber'],
+                CONFIG.separator,
+            );
+            const { sqlRows, colNamesString } = this.generateSQL(
+                tableName,
+                columns,
+                uniqueRows,
+                head.split(CONFIG.separator),
+                CONFIG.separator,
+            );
+
+            const chunks = Array(Math.ceil(sqlRows.length / CONFIG.chunkSize))
+                .fill()
+                .map((_, i) => sqlRows.slice(i * CONFIG.chunkSize, (i + 1) * CONFIG.chunkSize));
+
+            chunks.forEach((chunk, chunkIndex) => {
+                let sqlContent = isTableCreated ? '' : this.createTableSQL(tableName, columns);
+                isTableCreated = true;
+
+                for (let i = 0; i < chunk.length; i += CONFIG.dumpSize) {
+                    const block = chunk.slice(i, Math.min(i + CONFIG.dumpSize, chunk.length)).join(',\n');
+                    sqlContent += `INSERT INTO \`${tableName}\` (${colNamesString}) VALUES\n${block};\n`;
+                }
+
+                const outputFile = join(CONFIG.outputDir, `${fileName}_${chunkIndex + 1}.sql`);
+                writeFileSync(outputFile, sqlContent);
+                console.log(`Generated file: ${outputFile}`);
+            });
+        }
+
+        const duplicatesOutput = Object.entries(duplicatesStorage)
+            .filter(([_, count]) => count > 1)
+            .map(([key, count]) => `${key} - ${count}`)
+            .join('\n');
+
+        writeFileSync(join(CONFIG.outputDir, 'duplicates.txt'), duplicatesOutput);
+    }
 }
 
-const tableName = 'AltaGenAugust2025';
-const shouldCreateTable = true;
+async function main() {
+    await DataProcessor.processFiles('AltaGenAugust2025', columns, true);
+}
 
-createTableAndFillFromCSV(tableName, columns);
-
-// const a = `NAAB Code;InterRegNumber;Name;Full Name;Breed;TPI;NM$;CM$;FM$;GM$;Milk;Protein;Prot%;Fat;Fat %;CFP;FE;Feed Saved;Prel;D / H;PL;C-LIV;H-LIV;FI;DPR;SCS;SCE;SCE Rel;SCE Obs;DCE;SSB;DSB;CCR;HCR;EFC;GL;MAST;KET;RP;MET;DA;MF;MS;DWP$;WT$;CW$;PTAT;UDC;FLC;BWC;DC;TRel;D / H;Stature;Strength;Body Depth;Dairy form;Rump Angle;Thurl Width;RLSV;RLRV;Foot Angle;FLS;F. Udder Att.;R Udder Height;Rear Udder Width;Udder Cleft;Udder Depth;FTP;RTP;Teat Length;Pedigree;aAa;DMS;Kappa-Casein;Beta-Casein;B-LACT;Genetic Codes;Haplotypes;RHA;EFI;Birth Date;Proof;ADV;GS;FS;511;EDGE;CP;CP511
-// string;string;string;string;string;integer;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;string;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;string;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;decimal;string;string;string;string;string;string;string;string;decimal;decimal;string;string;string;string;string;string;string;string;string`;
-
-// const b = a.split("\n");
-
-// const c = b[1].split(";");
-
-// const d = b[0].split(";").reduce(
-//   (acc, fieldName, index) => ({
-//     ...acc,
-//     [fieldName]: {
-//       type: c[index],
-//     },
-//   }),
-//   {}
-// );
-
-// console.log(JSON.stringify(d));
-
-// // Обновление колонок
-// function generateAlterTableSQL(tableName, columns) {
-//     // Начало SQL-запроса
-//     let sql = `ALTER TABLE ${tableName} `;
-
-//     // Массив для хранения изменений
-//     const changes = [];
-
-//     // Проходим по каждому столбцу
-//     columns.forEach(column => {
-//         // Формируем часть запроса для изменения столбца
-//         changes.push(`MODIFY COLUMN \`${column.name}\` ${column.type}`);
-//     });
-
-//     // Объединяем все изменения в один запрос
-//     sql += changes.join(", ") + ";";
-
-//     return sql;
-// }
-
-// // Пример использования
-// const sqlQuery = generateAlterTableSQL(tableName, columns);
-// console.log(sqlQuery);
+main().catch(console.error);
