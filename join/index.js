@@ -13,9 +13,7 @@ async function mergeXlsxFiles() {
 
         // Получаем список всех xlsx файлов в папке input
         const files = await fs.promises.readdir(inputDir);
-        const xlsxFiles = files.filter(
-            (file) => path.extname(file).toLowerCase() === '.xlsx',
-        );
+        const xlsxFiles = files.filter((file) => path.extname(file).toLowerCase() === '.xlsx');
 
         if (xlsxFiles.length === 0) {
             console.log('В папке input не найдено xlsx файлов');
@@ -25,7 +23,7 @@ async function mergeXlsxFiles() {
         // Читаем каждый xlsx файл
         for (const file of xlsxFiles) {
             const filePath = path.join(inputDir, file);
-            const fileName = file.replace('.xslx', '');
+            const fileName = file.replace('.xlsx', '');
 
             // Читаем xlsx файл
             const workbook = XLSX.readFile(filePath);
@@ -35,9 +33,7 @@ async function mergeXlsxFiles() {
             const worksheet = workbook.Sheets[sheetName];
 
             // Конвертируем лист в массив объектов
-            const data = XLSX.utils
-                .sheet_to_csv(worksheet, { FS: ';' })
-                .replace(/'/g, `"`);
+            const data = XLSX.utils.sheet_to_csv(worksheet, { FS: ';' }).replace(/'/g, `"`);
 
             const outputPath = path.join(outputDir, `${fileName}.csv`);
             fs.writeFileSync(outputPath, data);
