@@ -1,5 +1,4 @@
-input
-result
-output
+input/*.xlsx
+output/*.sql
 
 node_modules
