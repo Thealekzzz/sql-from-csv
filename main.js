@@ -12,7 +12,7 @@ const CONFIG = {
     chunkSize: 50000,
     dumpSize: 65,
     separator: ';',
-    tableName: 'AltaGenAugust2025',
+    tableName: 'AltaGenDecember2025',
     uniqueIndexColumns: ['name', 'naab_code', 'inter_reg_number', 'inventory_number'],
 };
 
@@ -33,7 +33,10 @@ async function main() {
     ${colDefs}
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
     
+    CREATE INDEX idx_inter_reg_number ON AltaGenDecember2025 (inter_reg_number);
+    CREATE INDEX idx_naab_code ON AltaGenDecember2025 (naab_code);
     ${uniqueIndex}
+
     `;
     }
 
@@ -62,6 +65,20 @@ async function main() {
         }
 
         const outputFile = path.join(__dirname, 'output', `data_${chunkIndex + 1}.sql`);
+
+        if (chunkIndex === chunks.length - 1) {
+            sqlContent += `
+UPDATE ${CONFIG.tableName}
+SET inter_reg_number_trimmed = 
+    REGEXP_REPLACE(inter_reg_number, '^[0-9]*[A-Za-z]+0*', '')
+WHERE inter_reg_number REGEXP '^[0-9]*[A-Za-z]+0*[0-9]+$';
+
+UPDATE ${CONFIG.tableName}
+SET naab_code_trimmed = 
+    REGEXP_REPLACE(naab_code_trimmed, '^[0-9]*[A-Za-z]+0*', '')
+WHERE naab_code_trimmed REGEXP '^[0-9]*[A-Za-z]+0*[0-9]+$';`
+        }
+
         writeFileSync(outputFile, sqlContent, 'utf8');
         console.log(`Generated file: ${outputFile}`);
     });

@@ -17,6 +17,7 @@ export function parseXlsx(buffer) {
         }
 
         const headers = jsonData[0].map((h) => String(h).trim());
+
         const rows = jsonData.slice(1).filter((row) => {
             const key = row[0] + row[1] + row[2];
             if (!dublicatesCounter[key]) {
@@ -25,20 +26,9 @@ export function parseXlsx(buffer) {
             }
 
             return false;
-        });
-        // .map((row) =>
-        //     row.map((cell) => {
-        //         if (!cell) {
-        //             return '';
-        //         }
+        }).map((row) => (row.map((cell) => typeof cell === 'string' ? cell.replace(/,/g, ".") : cell)));
 
-        //         if (Number.isNaN(Number(cell))) {
-        //             return `'${cell}'`;
-        //         }
-
-        //         return cell;
-        //     }),
-        // );
+        console.log(rows.slice(0, 2))
 
         return { headers, rows };
     } catch (error) {

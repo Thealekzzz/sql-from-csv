@@ -8,42 +8,54 @@ export function getAllUniqueHeaders(allParsedData) {
     return Array.from(allHeaders);
 }
 
-export function normalizeRowsToHeaders(rows, headers, currentHeaders) {
-    // Создаем карту, где ключ - заголовок из headers, значение - индекс этого заголовка в currentHeaders
+export function normalizeRowsToHeaders(rows, currentHeaders) {
+    // Создаем карту, где ключ - заголовок из columns, значение - индекс этого заголовка в currentHeaders
     const headerMap = new Map();
-    headers.slice(1).forEach((header, index) => {
-        const currentIndex = currentHeaders.indexOf(header.ruColumnNameInTable);
+    columns.slice(1).forEach((column, index) => {
+        const currentIndex = currentHeaders.indexOf(column.ruColumnNameInTable);
         if (currentIndex !== -1) {
             headerMap.set(index, {
                 currentIndex,
-                isDigit: header.isDigit,
-                header: header.ruColumnNameInTable,
+                isDigit: column.isDigit,
+                header: column.ruColumnNameInTable,
                 tableheader: currentHeaders[currentIndex],
-                notFoundValue: null,
+                isFound: true,
             });
         } else {
-            headerMap.set(index, {
-                isDigit: header.isDigit,
-                notFoundValue: 'NULL',
-            });
+            const currentIndex = currentHeaders.indexOf(column.columnNameInTable);
+            if (currentIndex !== -1) {
+                headerMap.set(index, {
+                    currentIndex,
+                    isDigit: column.isDigit,
+                    header: column.columnNameInTable,
+                    tableheader: currentHeaders[currentIndex],
+                    isFound: true,
+                });
+
+            } else {
+                headerMap.set(index, {
+                    isDigit: column.isDigit,
+                    isFound: false,
+                });
+            }
         }
     });
 
     // Преобразуем строки
     return rows.map((row) => {
         // Создаем новую строку с нужным количеством колонок, заполненную пустыми строками
-        const normalizedRow = new Array(headers.length - 1).fill('');
+        const normalizedRow = new Array(columns.length - 1).fill('');
 
         // Заполняем новую строку данными из исходной строки согласно карте заголовков
-        headerMap.forEach(({ currentIndex, isDigit, notFoundValue }, newIndex) => {
-            if (notFoundValue === null) {
+        headerMap.forEach(({ currentIndex, isDigit, isFound, header }, newIndex) => {
+            if (isFound) {
                 normalizedRow[newIndex] = row[currentIndex]
                     ? isDigit
                         ? row[currentIndex]
-                        : `'${row[currentIndex]}'`
+                        : `'${typeof row[currentIndex] === 'string' ? row[currentIndex].replace(/'/g, "''") : row[currentIndex]}'`
                     : 'NULL';
             } else {
-                normalizedRow[newIndex] = notFoundValue;
+                normalizedRow[newIndex] = 'NULL';
             }
         });
 
@@ -57,7 +69,7 @@ export function mergeAllData(allParsedData) {
     const headersForDB = columns.slice(1).map(({ ruColumnNameInTable }) => ruColumnNameInTable);
 
     allParsedData.forEach(({ rows, headers: currentHeaders }) => {
-        const normalized = normalizeRowsToHeaders(rows, columns, currentHeaders);
+        const normalized = normalizeRowsToHeaders(rows, currentHeaders);
         mergedRows = mergedRows.concat(normalized);
     });
     return { headers: headersForDB, rows: mergedRows };

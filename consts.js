@@ -119,6 +119,20 @@ export const columns = [
         isDigit: false,
     },
     {
+        name: 'naab_code_trimmed',
+        type: "VARCHAR(32) DEFAULT ''",
+        columnNameInTable: 'naab_code_trimmed',
+        ruColumnNameInTable: 'naab_code_trimmed',
+        isDigit: false,
+    },
+    {
+        name: 'inter_reg_number_trimmed',
+        type: "VARCHAR(32) DEFAULT ''",
+        columnNameInTable: 'inter_reg_number_trimmed',
+        ruColumnNameInTable: 'inter_reg_number_trimmed',
+        isDigit: false,
+    },
+    {
         name: 'inventory_number',
         type: "VARCHAR(32) DEFAULT ''",
         columnNameInTable: 'InventoryNumber',
@@ -708,10 +722,10 @@ export const columns = [
     },
     {
         name: 'birth_date',
-        type: 'DATE',
+        type: "VARCHAR(16) DEFAULT ''",
         columnNameInTable: 'Birth Date',
         ruColumnNameInTable: 'Дата рождения',
-        isDigit: true,
+        isDigit: false,
     },
     {
         name: 'proof',
