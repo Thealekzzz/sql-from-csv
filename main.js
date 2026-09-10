@@ -69,14 +69,10 @@ async function main() {
         if (chunkIndex === chunks.length - 1) {
             sqlContent += `
 UPDATE ${CONFIG.tableName}
-SET inter_reg_number_trimmed = 
-    REGEXP_REPLACE(inter_reg_number, '^[0-9]*[A-Za-z]+0*', '')
-WHERE inter_reg_number REGEXP '^[0-9]*[A-Za-z]+0*[0-9]+$';
+SET inter_reg_number_trimmed = REGEXP_SUBSTR(inter_reg_number, '[1-9][0-9]+$');
 
 UPDATE ${CONFIG.tableName}
-SET naab_code_trimmed = 
-    REGEXP_REPLACE(naab_code_trimmed, '^[0-9]*[A-Za-z]+0*', '')
-WHERE naab_code_trimmed REGEXP '^[0-9]*[A-Za-z]+0*[0-9]+$';`
+SET naab_code_trimmed = REGEXP_SUBSTR(naab_code, '[1-9][0-9]+$');`
         }
 
         writeFileSync(outputFile, sqlContent, 'utf8');
